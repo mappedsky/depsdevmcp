@@ -4,8 +4,9 @@ An MCP server for [deps.dev](https://deps.dev), built in Go with the
 [`github.com/edoardottt/depsdev`](https://github.com/edoardottt/depsdev) stable
 v3 client module.
 
-The server communicates over stdio, supports MCP protocol version `2026-07-28`,
-and returns both structured JSON and a JSON text fallback for every tool result.
+The server communicates over stdio or streamable HTTP, supports MCP protocol
+version `2026-07-28`, and returns both structured JSON and a JSON text fallback
+for every tool result.
 
 ## Tools
 
@@ -43,8 +44,31 @@ Go 1.25 or newer is required because the MCP SDK requires it.
 
 ```sh
 go build -o depsdevmcp ./cmd/depsdevmcp
+# stdio transport (default)
 ./depsdevmcp
+
+# stateless streamable HTTP
+./depsdevmcp -transport http
 ```
+
+The default HTTP endpoint is `http://127.0.0.1:8080/mcp`. Configure it with:
+
+| Flag | Environment variable | Default |
+| --- | --- | --- |
+| `-transport` | `DEPSDEVMCP_TRANSPORT` | `stdio` |
+| `-http-address` | `DEPSDEVMCP_HTTP_ADDRESS` | `127.0.0.1:8080` |
+| `-http-path` | `DEPSDEVMCP_HTTP_PATH` | `/mcp` |
+| `-cache-capacity` | `DEPSDEVMCP_CACHE_CAPACITY` | `256` |
+
+Streamable HTTP is stateless so it can negotiate MCP `2026-07-28`. The shared
+deps.dev LRU cache remains process-wide across requests.
+
+For remote deployments, put the endpoint behind an authenticating TLS reverse
+proxy. The server has no built-in authentication and deliberately binds only to
+loopback by default. Cross-origin browser requests and localhost DNS-rebinding
+attempts are rejected.
+
+### Stdio client configuration
 
 Example MCP client configuration:
 
@@ -61,10 +85,24 @@ Example MCP client configuration:
 
 ## Run with Docker
 
+Stdio:
+
 ```sh
 docker build -t depsdevmcp .
 docker run --rm -i depsdevmcp
 ```
+
+Streamable HTTP, exposed only on the host loopback interface:
+
+```sh
+docker run --rm \
+  -p 127.0.0.1:8080:8080 \
+  depsdevmcp \
+  -transport http \
+  -http-address 0.0.0.0:8080
+```
+
+Connect an HTTP-capable MCP client to `http://127.0.0.1:8080/mcp`.
 
 Example MCP client configuration using the published GHCR image:
 
