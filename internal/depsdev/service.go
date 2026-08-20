@@ -12,6 +12,30 @@ import (
 	"github.com/mappedsky/depsdevmcp/internal/cache"
 )
 
+const maxDependencyPathDepth = 64
+
+// DependencyPathResult is a compact reachability view over a resolved graph.
+type DependencyPathResult struct {
+	Package  string                  `json:"package" jsonschema:"Root package and version searched."`
+	Target   string                  `json:"target" jsonschema:"Requested dependency package name."`
+	PullsIn  bool                    `json:"pulls_in" jsonschema:"Whether the target occurs in the resolved dependency graph."`
+	Versions []DependencyPathVersion `json:"versions" jsonschema:"Distinct target versions found in the graph."`
+	Paths    []string                `json:"paths" jsonschema:"One dependency chain from each target version back toward the root."`
+	Note     string                  `json:"note,omitempty" jsonschema:"Additional context, including a plain explanation when the target is absent."`
+}
+
+// DependencyPathVersion identifies a target version found in the graph.
+type DependencyPathVersion struct {
+	Name     string `json:"name" jsonschema:"Canonical target package name."`
+	Version  string `json:"version" jsonschema:"Resolved target package version."`
+	Relation string `json:"relation" jsonschema:"Relationship to the root: SELF, DIRECT, or INDIRECT."`
+}
+
+type parentEdge struct {
+	parent      int
+	requirement string
+}
+
 // API is the stable v3 surface used by Service.
 type API interface {
 	GetPackage(packageManager, packageName string) (definition.Package, error)
@@ -69,6 +93,20 @@ func (s *Service) GetRequirements(system, name, version string) (definition.Requ
 	return cached(s.cache, cacheKey("requirements", system, name, version), func() (definition.Requirements, error) {
 		return s.api.GetRequirements(system, name, version)
 	})
+}
+
+// FindDependencyPath reports whether target occurs in the resolved dependency
+// graph and returns one parent chain for each distinct target version.
+func (s *Service) FindDependencyPath(system, name, version, target string) (DependencyPathResult, bool, error) {
+	dependencies, hit, err := s.GetDependencies(system, name, version)
+	if err != nil {
+		return DependencyPathResult{}, false, err
+	}
+	if dependencies.Error != "" {
+		return DependencyPathResult{}, hit, fmt.Errorf("resolved dependency graph error: %s", dependencies.Error)
+	}
+
+	return findDependencyPath(dependencies, name, version, target), hit, nil
 }
 
 func (s *Service) GetProject(project string) (definition.Project, bool, error) {
@@ -133,6 +171,81 @@ func cached[T any](c *cache.LRU[string, json.RawMessage], key string, fetch func
 
 func normalizeSystem(system string) string {
 	return strings.ToLower(strings.TrimSpace(system))
+}
+
+func findDependencyPath(dependencies definition.Dependencies, name, version, target string) DependencyPathResult {
+	result := DependencyPathResult{
+		Package:  packageLabel(name, version),
+		Target:   target,
+		Versions: make([]DependencyPathVersion, 0),
+		Paths:    make([]string, 0),
+	}
+
+	parents := make(map[int]parentEdge, len(dependencies.Edges))
+	for _, edge := range dependencies.Edges {
+		if edge.FromNode < 0 || edge.FromNode >= len(dependencies.Nodes) ||
+			edge.ToNode < 0 || edge.ToNode >= len(dependencies.Nodes) {
+			continue
+		}
+		if _, exists := parents[edge.ToNode]; !exists {
+			parents[edge.ToNode] = parentEdge{parent: edge.FromNode, requirement: edge.Requirement}
+		}
+	}
+
+	seenVersions := make(map[string]struct{})
+	truncated := false
+	for nodeIndex, node := range dependencies.Nodes {
+		if !strings.EqualFold(node.VersionKey.Name, target) {
+			continue
+		}
+
+		versionKey := strings.ToLower(node.VersionKey.Name) + "\x00" + node.VersionKey.Version
+		if _, seen := seenVersions[versionKey]; seen {
+			continue
+		}
+		seenVersions[versionKey] = struct{}{}
+
+		result.PullsIn = true
+		result.Versions = append(result.Versions, DependencyPathVersion{
+			Name:     node.VersionKey.Name,
+			Version:  node.VersionKey.Version,
+			Relation: node.Relation,
+		})
+		path, wasTruncated := dependencyPath(dependencies.Nodes, parents, nodeIndex)
+		result.Paths = append(result.Paths, path)
+		truncated = truncated || wasTruncated
+	}
+
+	if !result.PullsIn {
+		result.Note = fmt.Sprintf("target %q is not present in the resolved dependency graph for %s", target, result.Package)
+	} else if truncated {
+		result.Note = fmt.Sprintf("one or more paths were truncated at %d hops because the graph contains a cycle or is unusually deep", maxDependencyPathDepth)
+	}
+	return result
+}
+
+func dependencyPath(nodes []definition.Node, parents map[int]parentEdge, start int) (string, bool) {
+	path := packageLabel(nodes[start].VersionKey.Name, nodes[start].VersionKey.Version)
+	current := start
+	for depth := 0; depth < maxDependencyPathDepth; depth++ {
+		if nodes[current].Relation == "SELF" {
+			return path, false
+		}
+		edge, ok := parents[current]
+		if !ok {
+			return path, false
+		}
+		path += " <-(" + edge.requirement + ") " + packageLabel(
+			nodes[edge.parent].VersionKey.Name,
+			nodes[edge.parent].VersionKey.Version,
+		)
+		current = edge.parent
+	}
+	return path, true
+}
+
+func packageLabel(name, version string) string {
+	return name + "@" + version
 }
 
 func cacheKey(parts ...string) string {

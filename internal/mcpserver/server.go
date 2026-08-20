@@ -14,7 +14,7 @@ import (
 
 const (
 	Name    = "depsdevmcp"
-	Version = "0.2.0"
+	Version = "0.3.0"
 )
 
 type PackageInput struct {
@@ -26,6 +26,13 @@ type VersionInput struct {
 	System  string `json:"system" jsonschema:"Package ecosystem: go, rubygems, npm, cargo, maven, pypi, or nuget."`
 	Name    string `json:"name" jsonschema:"Package name in the ecosystem's native format."`
 	Version string `json:"version" jsonschema:"Exact package version."`
+}
+
+type DependencyPathInput struct {
+	System  string `json:"system" jsonschema:"Package ecosystem: npm, cargo, maven, or pypi."`
+	Name    string `json:"name" jsonschema:"Root package name in the ecosystem's native format."`
+	Version string `json:"version" jsonschema:"Exact root package version."`
+	Target  string `json:"target" jsonschema:"Dependency package name to find in the resolved graph."`
 }
 
 type ProjectInput struct {
@@ -86,6 +93,20 @@ func New(deps *service.Service) *mcp.Server {
 		}
 		value, hit, err := deps.GetDependencies(in.System, in.Name, in.Version)
 		return nil, Output[definition.Dependencies]{Data: value, Cached: hit}, err
+	})
+
+	mcp.AddTool(server, tool(
+		"depsdev_find_dependency_path",
+		"Find whether an exact npm, Cargo, Maven, or PyPI package version pulls in a target, returning each resolved target version and one compact chain back to the root. Resolved requirements may differ from declarations because of environment markers; use depsdev_get_requirements to inspect declarations.",
+	), func(_ context.Context, _ *mcp.CallToolRequest, in DependencyPathInput) (*mcp.CallToolResult, Output[service.DependencyPathResult], error) {
+		if err := validateVersion(VersionInput{System: in.System, Name: in.Name, Version: in.Version}, input.DepsValidPackageManagers); err != nil {
+			return nil, Output[service.DependencyPathResult]{}, err
+		}
+		if err := require("target", in.Target); err != nil {
+			return nil, Output[service.DependencyPathResult]{}, err
+		}
+		value, hit, err := deps.FindDependencyPath(in.System, in.Name, in.Version, in.Target)
+		return nil, Output[service.DependencyPathResult]{Data: value, Cached: hit}, err
 	})
 
 	mcp.AddTool(server, tool(
