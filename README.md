@@ -15,6 +15,7 @@ for every tool result.
 | `depsdev_get_package` | Package metadata and known versions |
 | `depsdev_get_version` | Exact version metadata, licenses, and advisories |
 | `depsdev_get_dependencies` | Resolved dependency graph |
+| `depsdev_find_dependency_path` | Target versions and compact chains through a resolved dependency graph |
 | `depsdev_get_requirements` | Declared dependency requirements |
 | `depsdev_get_project` | GitHub, GitLab, or Bitbucket project metadata |
 | `depsdev_get_project_package_versions` | Project-to-package-version mappings |
@@ -143,3 +144,19 @@ Artifact hash query:
   "query": "hash.type=SHA1&hash.value=ulXBPXrC%2FUTfnMgHRFVxmjPzdbk%3D"
 }
 ```
+
+Dependency path query:
+
+```json
+{
+  "system": "pypi",
+  "name": "botocore",
+  "version": "1.34.100",
+  "target": "urllib3"
+}
+```
+
+The path tool returns one chain per distinct target version, including the
+requirement on every edge. An absent target is a successful result with
+`pulls_in: false` and an explanatory note. Resolved graphs are available for
+npm, Cargo, Maven, and PyPI.

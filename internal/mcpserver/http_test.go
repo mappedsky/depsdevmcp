@@ -37,8 +37,8 @@ func TestStreamableHTTPNegotiates20260728AndCallsTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if got := len(tools.Tools); got != 9 {
-		t.Fatalf("tool count = %d; want 9", got)
+	if got := len(tools.Tools); got != 10 {
+		t.Fatalf("tool count = %d; want 10", got)
 	}
 
 	for call := range 2 {
