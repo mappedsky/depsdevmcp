@@ -25,6 +25,27 @@ for every tool result.
 
 All tools are read-only and are annotated as such in their MCP definitions.
 
+## Security contract
+
+The MCP tool surface has the following application-level guarantees:
+
+- **Read-only:** every upstream API operation is an HTTPS `GET`. The graph and
+  dependency-path tools only transform retrieved data in memory. The tools do
+  not mutate deps.dev or persistent local state, and their MCP definitions set
+  `readOnlyHint: true` and `destructiveHint: false`.
+- **Fixed upstream:** outbound API requests are constructed against the fixed
+  `https://api.deps.dev/v3` base URL. Tool inputs select deps.dev resources or
+  query parameters; no tool accepts a destination URL, so an MCP caller cannot
+  use the server to fetch an arbitrary URL.
+- **No filesystem tools:** no tool lists, reads, creates, changes, or deletes
+  local files. Configuration is read from command-line arguments and
+  environment variables, and cached responses remain in process memory.
+
+These are properties of the application, not an operating-system sandbox. The
+process still uses its configured stdio or HTTP transport and the host's normal
+DNS, proxy, TLS, and HTTP redirect behavior. Run it with least-privilege OS or
+container permissions when stronger isolation is required.
+
 ## Cache
 
 Successful deps.dev responses are stored in a concurrency-safe, process-local
